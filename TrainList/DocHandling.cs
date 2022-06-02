@@ -14,8 +14,9 @@ namespace TrainList
 {
     public static class DocHandling
     {
-        static string xmlfile = @"..\..\..\files\Data.xml";
-        static string excelfile = "";
+        private static string xmlfile = @"..\..\..\files\Data.xml";
+        private static string excelfile = "";
+        public static string trainIndex = null;
 
         static public void ReadXmlFile(ref RootCollection roots)
         {
@@ -23,10 +24,58 @@ namespace TrainList
             StreamReader reader = new StreamReader(xmlfile);
             roots = (RootCollection)serializer.Deserialize(reader);
             reader.Close();
+
+            DbRecording(roots);
         }
 
-        static public void CreateExcelFile(RootCollection roots, string trainIndex)
+        static private void DbRecording(RootCollection roots)
         {
+            // Записывает данные xml в бд
+            using (TrainContext context = new TrainContext())
+            {
+                foreach (var r in roots.Row)
+                {
+                    if (context.Wagons.Where(c => c.CarNumber.ToString() == r.CarNumber).FirstOrDefault() == null)
+                    {
+                        Train train = new Train { TrainNumber = int.Parse(r.TrainNumber) };
+                        Movements move = new Movements
+                        {
+                            Departure = r.FromStationName,
+                            Destination = r.ToStationName,
+                            Dislocation = r.LastStationName,
+                            Trains = train
+                        };
+                        Compositions com = new Compositions
+                        {
+                            Number = r.TrainIndexCombined.Split("-")[1],
+                            InvoiceNum = r.InvoiceNum,
+                            Operations = r.LastOperationName,
+                            DateTime = DateTime.ParseExact(r.WhenLastOperation, "dd.MM.yyyy HH:mm:ss", null),
+                            Trains = train
+                        };
+                        Wagons wag = new Wagons
+                        {
+                            CarNumber = int.Parse(r.CarNumber),
+                            FreightEtsngName = r.FreightEtsngName,
+                            FreightTotalWeightKg = int.Parse(r.FreightTotalWeightKg),
+                            PositionInTrain = int.Parse(r.PositionInTrain),
+                            Compositions = com
+                        };
+
+                        context.Trains.Add(train);
+                        context.Compositions.Add(com);
+                        context.Movements.Add(move);
+                        context.Wagons.Add(wag);
+                        context.SaveChanges();
+                    }
+                }
+            }
+        }
+
+        static public void CreateExcelFile()
+        {
+            TrainContext context = new TrainContext();
+
             excelfile = $@"..\..\..\files\Train_{trainIndex}.xlsx";
 
             ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
@@ -39,11 +88,11 @@ namespace TrainList
                 FillTable(osheet);
 
                 // Вытягивает информацию по конкретному поезду
-                var list = roots.Row
-                    .Where(x => x.TrainIndexCombined
-                    .Split("-")[1] == trainIndex).OrderBy(x => x.PositionInTrain);
+                var list = context.TrainViews
+                    .Where(x => x.CompositionNumber
+                    == trainIndex).OrderBy(x => x.PositionInTrain);
 
-                string date = list.Select(s => s.WhenLastOperation).First();
+                string date = list.Select(s => s.WhenLastOperation).First().ToString();
 
                 // Шапка натурного листа
                 osheet.Cells["C3"].Value = trainIndex;
@@ -61,7 +110,7 @@ namespace TrainList
                     .Select(s => s.FreightEtsngName)
                     .Distinct().Count();
 
-                // Заполнение данными из xml файла
+                // Заполнение данными из бд
                 foreach (var l in list)
                 {
                     // Стили
@@ -92,7 +141,7 @@ namespace TrainList
                     osheet.Cells[$"E{row}"].Value = Regex
                         .Replace(n, @"\b\w+\b", (x) => x.Value.Substring(0, 1)).Replace(" ", "");
                     osheet.Cells[$"F{row}"].Value = list.Where(l => l.FreightEtsngName == n)
-                        .Select(s => int.Parse(s.FreightTotalWeightKg)).Sum();
+                        .Select(s => s.FreightTotalWeightKg).Sum();
                     row++;
                 }
                 // Стили для итогов
@@ -103,7 +152,7 @@ namespace TrainList
                 // Итоги
                 osheet.Cells[$"A{row}"].Value = $"Всего: {list.Count()}";
                 osheet.Cells[$"E{row}"].Value = uniqueEtsngName;
-                osheet.Cells[$"F{row}"].Value = list.Select(s => int.Parse(s.FreightTotalWeightKg)).Sum();
+                osheet.Cells[$"F{row}"].Value = list.Select(s => s.FreightTotalWeightKg).Sum();
 
                 if (File.Exists(excelfile))
                     File.Delete(excelfile);
