@@ -12,18 +12,16 @@ namespace TrainList
         static void Main(string[] args)
         {
             RootCollection roots = null;
-            string train = null;
 
             Console.Write("Номер состава: ");
-            train = Console.ReadLine();
+            DocHandling.trainIndex = Console.ReadLine();
 
             //Читаем xml файл
             DocHandling.ReadXmlFile(ref roots);
 
-            if(roots != null &&
-               train != null)
-            //Создаем и записываем в excel файл
-            DocHandling.CreateExcelFile(roots, train);
+            if (roots != null)
+                //Создаем и записываем в excel файл
+                DocHandling.CreateExcelFile();
 
             Console.Read();
         }
